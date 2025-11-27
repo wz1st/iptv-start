@@ -236,11 +236,15 @@ func updata(boot bool) bool {
 				}
 				dst := BIN_PATH + "/license"
 				if err := copyAndChmod(license, dst); err != nil {
-					log.Printf("复制 license 失败: %v", err)
-				} else {
-					startLicense()
-					waitLicense()
+					log.Fatalf("复制 license 失败: %v", err)
 				}
+				ver := BIN_PATH + "/Version_lic"
+				if err := copyAndChmod("/app/Version_lic", ver); err != nil {
+					log.Fatalf("复制 Version_lic 失败: %v", err)
+				}
+				startLicense()
+				waitLicense()
+
 			} else {
 				log.Println("授权服务文件不存在，跳过更新")
 				startLicense()
@@ -300,13 +304,16 @@ func updata(boot bool) bool {
 				}
 				dst := BIN_PATH + "/iptv"
 				if err := copyAndChmod(iptv, dst); err != nil {
-					log.Printf("复制 IPTV 失败: %v", err)
-				} else {
-					startIPTV()
+					log.Fatalf("复制 IPTV 失败: %v", err)
 				}
-			} else {
-				log.Println("IPTV 文件不存在，跳过更新")
+				ver := BIN_PATH + "/Version"
+				if err := copyAndChmod("/app/Version", ver); err != nil {
+					log.Fatalf("复制 Version 失败: %v", err)
+				}
 				startIPTV()
+
+			} else {
+				log.Fatalf("IPTV 文件不存在")
 			}
 		}
 		return true
