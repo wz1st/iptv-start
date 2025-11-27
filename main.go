@@ -225,12 +225,13 @@ func updata(boot bool) bool {
 			// 更新 license
 			license := "/app/license"
 			if _, err := os.Stat(license); err == nil {
-				log.Println("更新 license...")
+				log.Println("复制 license...")
 				if LICENSE_CMD != nil {
 					_ = LICENSE_CMD.Process.Kill()
 					_ = LICENSE_CMD.Wait()
 					LICENSE_CMD = nil
 				}
+				os.MkdirAll(BIN_PATH, 0755)
 				dst := BIN_PATH + "/license"
 				if err := copyAndChmod(license, dst); err != nil {
 					log.Printf("复制 license 失败: %v", err)
@@ -286,12 +287,13 @@ func updata(boot bool) bool {
 			// 更新 IPTV
 			iptv := "/app/iptv"
 			if _, err := os.Stat(iptv); err == nil {
-				log.Println("更新 IPTV...")
+				log.Println("复制 IPTV...")
 				if IPTV_CMD != nil {
 					_ = IPTV_CMD.Process.Kill()
 					_ = IPTV_CMD.Wait()
 					IPTV_CMD = nil
 				}
+				os.MkdirAll(BIN_PATH, 0755)
 				dst := BIN_PATH + "/iptv"
 				if err := copyAndChmod(iptv, dst); err != nil {
 					log.Printf("复制 IPTV 失败: %v", err)
