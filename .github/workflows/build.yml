@@ -1,0 +1,88 @@
+name: Build and Push by Tag
+
+on:
+  push:
+    tags:
+      - '*'   # 任何 tag 推送都会触发
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Install garble
+        run: go install mvdan.cc/garble@latest
+      
+      - name: Extract tag version
+        run: echo "IMAGE_VERSION=${GITHUB_REF_NAME}" >> $GITHUB_ENV
+
+      - name: Detect tag and update version
+        id: vars
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "Detected tag: $TAG_NAME"
+
+          # 替换版本号
+          sed -i "s/var VERSION     = \".*\"/var VERSION     = \"${TAG_NAME}\"/" main.go
+          echo "Updated main.go -> ${TAG_NAME}"
+
+          # 判断是否包含 beta
+          if [[ "$TAG_NAME" == *beta* ]]; then
+            echo "archs=amd64" >> $GITHUB_OUTPUT
+          else
+            echo "archs=amd64,arm64,arm" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build binaries
+        run: |
+          mkdir -p dist
+          IFS=',' read -ra ARCHS <<< "${{ steps.vars.outputs.archs }}"
+          for ARCH in "${ARCHS[@]}"; do
+            echo "Building for $ARCH..."
+            if [ "$ARCH" = "arm" ]; then
+              GOARM=7 CGO_ENABLED=0 GOOS=linux GOARCH=arm \
+                garble build -a -ldflags '-extldflags "-static" -s -w' \
+                -o dist/start_arm main.go
+            else
+              CGO_ENABLED=0 GOOS=linux GOARCH=$ARCH \
+                garble build -a -ldflags '-extldflags "-static" -s -w' \
+                -o dist/start_${ARCH} main.go
+            fi
+          done
+          ls -lh dist/
+
+      - name: Checkout target repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.REPO }}
+          token: ${{ secrets.PUSH_TOKEN }}
+          path: go-iptv
+
+      - name: Copy binaries to target repo
+        run: |
+          cd dist
+          # 生成 Version 文件
+          echo "${{ steps.vars.outputs.tag }}" > Version_start
+          cd ..
+          mkdir -p go-iptv/start_all
+          cp -rf dist/start_* go-iptv/start_all/
+          cp -rf dist/start_amd64 go-iptv/start
+          cp -rf dist/Version_lic go-iptv/start_all/
+
+      - name: Commit and push binaries
+        working-directory: go-iptv
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "升级服务版本更新: ${{ steps.vars.outputs.tag }}" || echo "没有变动"
+          git push origin main
