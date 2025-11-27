@@ -42,6 +42,7 @@ jobs:
       - name: Build binaries
         run: |
           mkdir -p dist
+          go mod download
           IFS=',' read -ra ARCHS <<< "${{ steps.vars.outputs.archs }}"
           for ARCH in "${ARCHS[@]}"; do
             echo "Building for $ARCH..."
@@ -63,8 +64,6 @@ jobs:
           repository: ${{ vars.REPO }}
           token: ${{ secrets.PUSH_TOKEN }}
           path: go-iptv
-          ref: main
-          fetch-depth: 0
 
       - name: Copy binaries to target repo
         run: |
