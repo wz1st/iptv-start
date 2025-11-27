@@ -184,6 +184,12 @@ func updata(boot bool) bool {
 		newLicVersion := ReadFile("/app/Version_lic")
 		curLicVersion := ReadFile(BIN_PATH + "/Version_lic")
 		if curLicVersion != "" {
+			if curLicVersion == "local" {
+				log.Println("授权服务为本地版本，跳过")
+				startLicense()
+				waitLicense()
+				return true
+			}
 			switch newLicVersion {
 			case "":
 				log.Println("授权服务版本文件不存在，跳过")
@@ -241,7 +247,13 @@ func updata(boot bool) bool {
 
 		newWebVersion := ReadFile("/app/Version")
 		curWebVersion := ReadFile(BIN_PATH + "/Version")
-		if curLicVersion != "" {
+		if curWebVersion != "" {
+			if curWebVersion == "local" {
+				log.Println("管理系统为本地版本，跳过更新")
+
+				startIPTV()
+				return true
+			}
 			switch newWebVersion {
 			case "":
 				log.Println("管理系统版本文件不存在，跳过")
