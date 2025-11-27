@@ -234,6 +234,8 @@ func updata(boot bool) bool {
 				}
 			} else {
 				log.Println("授权服务文件不存在，跳过更新")
+				startLicense()
+				waitLicense()
 			}
 		}
 
@@ -286,6 +288,7 @@ func updata(boot bool) bool {
 				}
 			} else {
 				log.Println("IPTV 文件不存在，跳过更新")
+				startIPTV()
 			}
 		}
 		return true
