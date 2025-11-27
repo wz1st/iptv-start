@@ -178,12 +178,115 @@ func updata(boot bool) bool {
 
 	if boot {
 		log.Println("系统启动中...")
-		if LICENSE_CMD == nil {
-			startLicense()
-			waitLicense()
+		licUp := false
+		webUp := false
+		// 判断版本
+		newLicVersion := ReadFile("/app/Version_lic")
+		curLicVersion := ReadFile(BIN_PATH + "/Version_lic")
+		if curLicVersion != "" {
+			switch newLicVersion {
+			case "":
+				log.Println("授权服务版本文件不存在，跳过")
+				if LICENSE_CMD == nil {
+					startLicense()
+					waitLicense()
+				}
+
+			case curLicVersion:
+				log.Println("授权服务为最新版本，跳过更新")
+				if LICENSE_CMD == nil {
+					startLicense()
+					waitLicense()
+				}
+			default:
+				check, err := isNewer(newLicVersion, curLicVersion, 3)
+				if err != nil {
+					log.Println(err.Error())
+					if LICENSE_CMD == nil {
+						startLicense()
+						waitLicense()
+					}
+				}
+				if check {
+					licUp = true
+				}
+			}
+		} else {
+			licUp = true
 		}
-		if IPTV_CMD == nil {
-			startIPTV()
+
+		if licUp {
+			// 更新 license
+			license := "/app/license"
+			if _, err := os.Stat(license); err == nil {
+				log.Println("更新 license...")
+				if LICENSE_CMD != nil {
+					_ = LICENSE_CMD.Process.Kill()
+					_ = LICENSE_CMD.Wait()
+					LICENSE_CMD = nil
+				}
+				dst := BIN_PATH + "/license"
+				if err := copyAndChmod(license, dst); err != nil {
+					log.Printf("复制 license 失败: %v", err)
+				} else {
+					startLicense()
+					waitLicense()
+				}
+			} else {
+				log.Println("授权服务文件不存在，跳过更新")
+			}
+		}
+
+		newWebVersion := ReadFile("/app/Version")
+		curWebVersion := ReadFile(BIN_PATH + "/Version")
+		if curLicVersion != "" {
+			switch newWebVersion {
+			case "":
+				log.Println("管理系统版本文件不存在，跳过")
+				if IPTV_CMD == nil {
+					startIPTV()
+				}
+
+			case curWebVersion:
+				log.Println("管理系统为最新版本，跳过更新")
+				if IPTV_CMD == nil {
+					startIPTV()
+				}
+			default:
+				check, err := isNewer(newWebVersion, curWebVersion, 4)
+				if err != nil {
+					log.Println(err.Error())
+					if IPTV_CMD == nil {
+						startIPTV()
+					}
+				}
+				if check {
+					webUp = true
+				}
+			}
+		} else {
+			webUp = true
+		}
+
+		if webUp {
+			// 更新 IPTV
+			iptv := WATCH_DIR + "/iptv"
+			if _, err := os.Stat(iptv); err == nil {
+				log.Println("更新 IPTV...")
+				if IPTV_CMD != nil {
+					_ = IPTV_CMD.Process.Kill()
+					_ = IPTV_CMD.Wait()
+					IPTV_CMD = nil
+				}
+				dst := BIN_PATH + "/iptv"
+				if err := copyAndChmod(iptv, dst); err != nil {
+					log.Printf("复制 IPTV 失败: %v", err)
+				} else {
+					startIPTV()
+				}
+			} else {
+				log.Println("IPTV 文件不存在，跳过更新")
+			}
 		}
 		return true
 	}
