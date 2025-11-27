@@ -231,7 +231,9 @@ func updata(boot bool) bool {
 					_ = LICENSE_CMD.Wait()
 					LICENSE_CMD = nil
 				}
-				os.MkdirAll(BIN_PATH, 0755)
+				if err := os.MkdirAll(BIN_PATH, 0755); err != nil {
+					log.Fatalln("复制启动文件失败，请检查目录权限")
+				}
 				dst := BIN_PATH + "/license"
 				if err := copyAndChmod(license, dst); err != nil {
 					log.Printf("复制 license 失败: %v", err)
@@ -293,7 +295,9 @@ func updata(boot bool) bool {
 					_ = IPTV_CMD.Wait()
 					IPTV_CMD = nil
 				}
-				os.MkdirAll(BIN_PATH, 0755)
+				if err := os.MkdirAll(BIN_PATH, 0755); err != nil {
+					log.Fatalln("复制启动文件失败，请检查目录权限")
+				}
 				dst := BIN_PATH + "/iptv"
 				if err := copyAndChmod(iptv, dst); err != nil {
 					log.Printf("复制 IPTV 失败: %v", err)
@@ -379,6 +383,9 @@ func updata(boot bool) bool {
 				_ = LICENSE_CMD.Wait()
 				LICENSE_CMD = nil
 			}
+			if err := os.MkdirAll(BIN_PATH, 0755); err != nil {
+				log.Fatalln("复制启动文件失败，请检查目录权限")
+			}
 			dst := BIN_PATH + "/license"
 			if err := copyAndChmod(license, dst); err != nil {
 				log.Printf("复制 license 失败: %v", err)
@@ -427,6 +434,9 @@ func updata(boot bool) bool {
 				_ = IPTV_CMD.Process.Kill()
 				_ = IPTV_CMD.Wait()
 				IPTV_CMD = nil
+			}
+			if err := os.MkdirAll(BIN_PATH, 0755); err != nil {
+				log.Fatalln("复制启动文件失败，请检查目录权限")
 			}
 			dst := BIN_PATH + "/iptv"
 			if err := copyAndChmod(iptv, dst); err != nil {
