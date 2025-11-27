@@ -223,7 +223,7 @@ func updata(boot bool) bool {
 	default:
 		check, err := isNewer(newLicVersion, curLicVersion, 3)
 		if err != nil {
-			log.Println("授权服务版本文件格式错误，跳过")
+			log.Println(err.Error())
 			if LICENSE_CMD == nil {
 				startLicense()
 				waitLicense()
@@ -251,6 +251,8 @@ func updata(boot bool) bool {
 				startLicense()
 				waitLicense()
 			}
+		} else {
+			log.Println("授权服务文件不存在，跳过更新")
 		}
 	}
 
@@ -271,7 +273,7 @@ func updata(boot bool) bool {
 	default:
 		check, err := isNewer(newWebVersion, curWebVersion, 4)
 		if err != nil {
-			log.Println("管理系统版本文件格式错误，跳过")
+			log.Println(err.Error())
 			if IPTV_CMD == nil {
 				startIPTV()
 			}
@@ -297,6 +299,8 @@ func updata(boot bool) bool {
 			} else {
 				startIPTV()
 			}
+		} else {
+			log.Println("IPTV 文件不存在，跳过更新")
 		}
 	}
 
@@ -335,6 +339,9 @@ func copyAndChmod(src, dst string) error {
 }
 
 func isNewer(newVer, oldVer string, vLen int) (bool, error) {
+	if newVer == oldVer {
+		return false, nil
+	}
 	newVer = strings.TrimPrefix(newVer, "v")
 	oldVer = strings.TrimPrefix(oldVer, "v")
 
