@@ -270,7 +270,7 @@ func updata(boot bool) bool {
 
 		if webUp {
 			// 更新 IPTV
-			iptv := WATCH_DIR + "/iptv"
+			iptv := "/app/iptv"
 			if _, err := os.Stat(iptv); err == nil {
 				log.Println("更新 IPTV...")
 				if IPTV_CMD != nil {
