@@ -61,12 +61,19 @@ func startLicense() bool {
 		return true
 	}
 	log.Println("启动授权服务...")
+	if !Exists(BIN_PATH + "/Version_lic") {
+		os.Remove(BIN_PATH + "/license")
+		os.Remove(BIN_PATH + "/Version_lic")
+	}
 	if !Exists(BIN_PATH + "/license") {
 		if err := os.MkdirAll(BIN_PATH, 0755); err != nil {
 			log.Fatal("config创建目录失败，请检查权限")
 		}
 		if err := copyAndChmod("/app/license", BIN_PATH+"/license"); err != nil {
-			log.Fatal("复制文件失败，请检查权限")
+			log.Fatal("复制文件license失败，请检查权限")
+		}
+		if err := copyAndChmod("/app/Version_lic", BIN_PATH+"/Version_lic"); err != nil {
+			log.Fatal("复制文件Version_lic失败，请检查权限")
 		}
 
 	}
@@ -124,14 +131,20 @@ func startIPTV() {
 		return
 	}
 	log.Println("启动 IPTV...")
+	if !Exists(BIN_PATH + "/Version") {
+		os.Remove(BIN_PATH + "/iptv")
+		os.Remove(BIN_PATH + "/Version")
+	}
 	if !Exists(BIN_PATH + "/iptv") {
 		if err := os.MkdirAll(BIN_PATH, 0755); err != nil {
 			log.Fatal("config创建目录失败，请检查权限")
 		}
 		if err := copyAndChmod("/app/iptv", BIN_PATH+"/iptv"); err != nil {
-			log.Fatal("复制文件失败，请检查权限")
+			log.Fatal("复制文件iptv失败，请检查权限")
 		}
-
+		if err := copyAndChmod("/app/Version", BIN_PATH+"/Version"); err != nil {
+			log.Fatal("复制文件Version失败，请检查权限")
+		}
 	}
 	cmd := exec.Command(BIN_PATH + "/iptv")
 	cmd.Stdout = os.Stdout
@@ -186,7 +199,8 @@ func updata(boot bool) bool {
 		return false
 	}
 
-	if !Exists(WATCH_DIR+"/license") && !Exists(WATCH_DIR+"/iptv") {
+	if (!Exists(WATCH_DIR+"/Version") || !Exists(WATCH_DIR+"/iptv")) &&
+		(!Exists(WATCH_DIR+"/Version_lic") || !Exists(WATCH_DIR+"/license")) {
 		log.Println("更新文件不完整，跳过")
 		if LICENSE_CMD == nil {
 			startLicense()
@@ -205,7 +219,8 @@ func updata(boot bool) bool {
 
 	// 判断版本
 	newLicVersion := ReadFile(WATCH_DIR + "/Version_lic")
-	curLicVersion := ReadFile("/app/Version_lic")
+	curLicVersion := ReadFile(BIN_PATH + "/Version_lic")
+
 	switch newLicVersion {
 	case "":
 		log.Println("授权服务版本文件不存在，跳过")
@@ -257,7 +272,7 @@ func updata(boot bool) bool {
 	}
 
 	newWebVersion := ReadFile(WATCH_DIR + "/Version")
-	curWebVersion := ReadFile("/app/Version")
+	curWebVersion := ReadFile(BIN_PATH + "/Version")
 	switch newWebVersion {
 	case "":
 		log.Println("管理系统版本文件不存在，跳过")
