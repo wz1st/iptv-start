@@ -50,11 +50,11 @@ jobs:
             echo "Building for $ARCH..."
             if [ "$ARCH" = "arm" ]; then
               GOARM=7 CGO_ENABLED=0 GOOS=linux GOARCH=arm \
-                garble build -a -ldflags '-extldflags "-static" -s -w' \
+                go build -ldflags "-s -w" \
                 -o dist/start_arm main.go
             else
               CGO_ENABLED=0 GOOS=linux GOARCH=$ARCH \
-                garble build -a -ldflags '-extldflags "-static" -s -w' \
+                go build -ldflags "-s -w" \
                 -o dist/start_${ARCH} main.go
             fi
           done
@@ -76,7 +76,7 @@ jobs:
           mkdir -p go-iptv/start_all
           cp -rf dist/start_* go-iptv/start_all/
           cp -rf dist/start_amd64 go-iptv/start
-          cp -rf dist/Version_lic go-iptv/start_all/
+          cp -rf dist/Version_start go-iptv/start_all/
 
       - name: Commit and push binaries
         working-directory: go-iptv
