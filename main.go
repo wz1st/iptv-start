@@ -13,8 +13,9 @@ import (
 	"golang.org/x/net/websocket"
 )
 
+var VERSION = "1.0.0"
+
 var (
-	VERSION     = "1.0.0"
 	BIN_PATH    = "/config/bin"
 	WATCH_DIR   = "/config/updata"
 	LICENSE_CMD *exec.Cmd
@@ -24,12 +25,16 @@ var (
 func main() {
 	log.Println("升级服务版本号:", VERSION)
 	// 启动服务器
-	updata()
-	// 监听升级信号
-	http.HandleFunc("/update", updateHandler)
-	http.HandleFunc("/licRestart", licRestart)
-	port := 82
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), nil))
+	if updata(true) {
+		// 监听升级信号
+		http.HandleFunc("/update", updateHandler)
+		http.HandleFunc("/licRestart", licRestart)
+		port := 82
+		log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), nil))
+	} else {
+		log.Fatal(errors.New("启动失败"))
+	}
+
 }
 
 func licRestart(w http.ResponseWriter, r *http.Request) {
@@ -149,14 +154,26 @@ func updateHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "OK")
 		return
 	}
-	if updata() {
+	if updata(false) {
 		fmt.Fprintln(w, "OK")
 	} else {
 		fmt.Fprintln(w, "FAIL")
 	}
 
 }
-func updata() bool {
+func updata(boot bool) bool {
+
+	if boot {
+		log.Println("系统启动中...")
+		if LICENSE_CMD == nil {
+			startLicense()
+			waitLicense()
+		}
+		if IPTV_CMD == nil {
+			startIPTV()
+		}
+		return true
+	}
 	if _, err := os.Stat(WATCH_DIR); os.IsNotExist(err) {
 		log.Println("更新目录不存在，跳过")
 		if LICENSE_CMD == nil {

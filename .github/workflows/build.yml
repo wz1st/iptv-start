@@ -29,7 +29,7 @@ jobs:
           echo "Detected tag: $TAG_NAME"
 
           # 替换版本号
-          sed -i "s/var VERSION     = \".*\"/var VERSION     = \"${TAG_NAME}\"/" main.go
+          sed -i "s/var VERSION = \".*\"/var VERSION = \"${TAG_NAME}\"/" main.go
           echo "Updated main.go -> ${TAG_NAME}"
 
           # 判断是否包含 beta
