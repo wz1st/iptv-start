@@ -402,6 +402,16 @@ func updata(boot bool) bool {
 			}
 		} else {
 			log.Println("授权服务文件不存在，跳过更新")
+			if LICENSE_CMD == nil {
+				startLicense()
+				waitLicense()
+			}
+
+		}
+	} else {
+		if LICENSE_CMD == nil {
+			startLicense()
+			waitLicense()
 		}
 	}
 
@@ -453,6 +463,13 @@ func updata(boot bool) bool {
 			}
 		} else {
 			log.Println("IPTV 文件不存在，跳过更新")
+			if IPTV_CMD == nil {
+				startIPTV()
+			}
+		}
+	} else {
+		if IPTV_CMD == nil {
+			startIPTV()
 		}
 	}
 
@@ -492,7 +509,7 @@ func copyAndChmod(src, dst string) error {
 
 func isNewer(newVer, oldVer string, vLen int) (bool, error) {
 	if newVer == oldVer {
-		return false, nil
+		return false, errors.New("已是最新版本，不更新")
 	}
 	newVer = strings.TrimPrefix(newVer, "v")
 	oldVer = strings.TrimPrefix(oldVer, "v")
@@ -519,7 +536,7 @@ func isNewer(newVer, oldVer string, vLen int) (bool, error) {
 			return true, nil
 		}
 		if a < b {
-			return false, nil
+			return false, errors.New("新版本低于当前版本，不更新")
 		}
 	}
 	return false, errors.New("版本号读取失败")
