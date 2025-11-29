@@ -47,7 +47,7 @@ func licRestart(w http.ResponseWriter, r *http.Request) {
 	LICENSE_CMD = nil
 	if startLicense() {
 		if waitLicense() {
-			log.Println("授权服务重启成功")
+			log.Println("引擎重启成功")
 			fmt.Fprintln(w, "OK")
 			return
 		}
@@ -55,12 +55,12 @@ func licRestart(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "FAIL")
 }
 
-// 启动授权服务
+// 启动引擎
 func startLicense() bool {
 	if LICENSE_CMD != nil {
 		return true
 	}
-	log.Println("启动授权服务...")
+	log.Println("启动引擎...")
 	if !Exists(BIN_PATH + "/Version_lic") {
 		os.Remove(BIN_PATH + "/license")
 		os.Remove(BIN_PATH + "/Version_lic")
@@ -93,16 +93,16 @@ func startLicense() bool {
 		return false
 	}
 	LICENSE_CMD = cmd
-	log.Printf("授权服务已启动，PID=%d", cmd.Process.Pid)
+	log.Printf("引擎已启动，PID=%d", cmd.Process.Pid)
 	return waitLicense()
 }
 
-// 等待授权服务可用 (通过 WebSocket ping)
+// 等待引擎可用 (通过 WebSocket ping)
 func waitLicense() bool {
 	url := "ws://127.0.0.1:81/ws"
 	timeout := 60 * time.Second
 	start := time.Now()
-	log.Println("等待授权服务可用...")
+	log.Println("等待引擎可用...")
 
 	for {
 		ws, err := websocket.Dial(url, "", "http://127.0.0.1:81/")
@@ -111,14 +111,14 @@ func waitLicense() bool {
 			msg := []byte("ping")
 			if _, err := ws.Write(msg); err == nil {
 				ws.Close()
-				log.Println("授权服务可用")
+				log.Println("引擎可用")
 				return true
 			}
 			ws.Close()
 		}
 
 		if time.Since(start) > timeout {
-			log.Println("等待授权服务超时")
+			log.Println("等待引擎超时")
 			return false
 		}
 		time.Sleep(1 * time.Second)
@@ -186,18 +186,18 @@ func updata(boot bool) bool {
 		curLicVersion := ReadFile(BIN_PATH + "/Version_lic")
 		if curLicVersion != "" {
 			if curLicVersion == "local" {
-				log.Println("授权服务为本地版本，跳过")
+				log.Println("引擎为本地版本，跳过")
 				startLicense()
 			}
 			switch newLicVersion {
 			case "":
-				log.Println("授权服务版本文件不存在，跳过")
+				log.Println("引擎版本文件不存在，跳过")
 				if LICENSE_CMD == nil {
 					startLicense()
 				}
 
 			case curLicVersion:
-				log.Println("授权服务为最新版本，跳过更新")
+				log.Println("引擎为最新版本，跳过更新")
 				if LICENSE_CMD == nil {
 					startLicense()
 				}
@@ -221,7 +221,7 @@ func updata(boot bool) bool {
 			// 更新 license
 			license := "/app/license"
 			if _, err := os.Stat(license); err == nil {
-				log.Println("复制 license...")
+				log.Println("复制引擎...")
 				if LICENSE_CMD != nil {
 					_ = LICENSE_CMD.Process.Kill()
 					_ = LICENSE_CMD.Wait()
@@ -241,7 +241,7 @@ func updata(boot bool) bool {
 				startLicense()
 
 			} else {
-				log.Fatalln("/app目录中 授权服务文件不存在")
+				log.Fatalln("/app目录中 引擎文件不存在")
 			}
 		} else {
 			startLicense()
@@ -346,13 +346,13 @@ func updata(boot bool) bool {
 
 	switch newLicVersion {
 	case "":
-		log.Println("授权服务版本文件不存在，跳过")
+		log.Println("引擎版本文件不存在，跳过")
 		if LICENSE_CMD == nil {
 			startLicense()
 		}
 
 	case curLicVersion:
-		log.Println("授权服务为最新版本，跳过更新")
+		log.Println("引擎为最新版本，跳过更新")
 		if LICENSE_CMD == nil {
 			startLicense()
 		}
@@ -374,7 +374,7 @@ func updata(boot bool) bool {
 		license := WATCH_DIR + "/license"
 		verUpdate := WATCH_DIR + "/Version_lic"
 		if _, err := os.Stat(license); err == nil {
-			log.Println("更新 license...")
+			log.Println("更新引擎...")
 
 			if err := os.MkdirAll(BIN_PATH, 0755); err != nil {
 				log.Fatalln("复制启动文件失败，请检查目录权限")
@@ -397,7 +397,7 @@ func updata(boot bool) bool {
 				startLicense()
 			}
 		} else {
-			log.Println("授权服务文件不存在，跳过更新")
+			log.Println("引擎文件不存在，跳过更新")
 			if LICENSE_CMD == nil {
 				startLicense()
 			}
@@ -441,7 +441,7 @@ func updata(boot bool) bool {
 		iptv := WATCH_DIR + "/iptv"
 		verUpdate := WATCH_DIR + "/Version"
 		if _, err := os.Stat(iptv); err == nil {
-			log.Println("更新 IPTV...")
+			log.Println("更新管理系统...")
 
 			if err := os.MkdirAll(BIN_PATH, 0755); err != nil {
 				log.Fatalln("复制启动文件失败，请检查目录权限 ,请检查目录权限并删除/config/bin/和/config/updata目录")
@@ -533,7 +533,7 @@ func isNewer(newVer, oldVer string, vLen int) (bool, error) {
 			if i <= 1 && vLen == 4 {
 				return false, errors.New("管理系统版本更新内容较大或基础镜像更新，不支持自动升级，请升级镜像")
 			} else if i == 0 && vLen == 3 {
-				return false, errors.New("授权服务版本更新内容较大或基础镜像更新，不支持自动升级，请升级镜像")
+				return false, errors.New("引擎版本更新内容较大或基础镜像更新，不支持自动升级，请升级镜像")
 			}
 			return true, nil
 		}
