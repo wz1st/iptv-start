@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"start/until"
 	"strings"
 	"time"
 
@@ -24,6 +25,16 @@ var (
 
 func main() {
 	log.Println("升级服务版本号:", VERSION)
+	if !until.IsPrivileged() {
+		log.Println("请使用privileged(特权模式、高权限执行容器)运行")
+		return
+	}
+	os.MkdirAll("/tmp/check_privileged", 0755)
+	if until.CheckRam() {
+		log.Println("可用内存不足256MB，无法运行")
+		return
+	}
+	os.MkdirAll("/tmp/check_start_ram", 0755)
 	// 启动服务器
 	if updata(true) {
 		// 监听升级信号
@@ -55,28 +66,67 @@ func licRestart(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "FAIL")
 }
 
+func checkLicense() error {
+	if !Exists("/app/Version_lic") || !Exists("/app/license") {
+		log.Fatal("镜像不完整，请重新拉取镜像")
+	}
+	if !Exists(BIN_PATH+"/Version_lic") || !Exists(BIN_PATH+"/license") {
+		os.Remove(BIN_PATH + "/license")
+		os.Remove(BIN_PATH + "/Version_lic")
+		if err := os.MkdirAll(BIN_PATH, 0755); err != nil {
+			log.Println("/config/bin/ 创建目录失败:" + err.Error())
+			return errors.New("/config/bin/ 创建目录失败,请检查目录权限并删除/config/bin/和/config/updata目录")
+		}
+		if err := copyAndChmod("/app/license", BIN_PATH+"/license"); err != nil {
+			log.Println("复制文件license失败:" + err.Error())
+			return errors.New("复制文件license失败,请检查目录权限并删除/config/bin/和/config/updata目录")
+		}
+		if err := copyAndChmod("/app/Version_lic", BIN_PATH+"/Version_lic"); err != nil {
+			log.Println("复制文件Version_lic失败:" + err.Error())
+			return errors.New("复制文件Version_lic失败,请检查目录权限并删除/config/bin/和/config/updata目录")
+		}
+		return nil
+	}
+	return nil
+}
+
+func checkIptv() error {
+	if !Exists("/app/Version") || !Exists("/app/iptv") {
+		log.Fatal("镜像不完整，请重新拉取镜像")
+	}
+	if !Exists(BIN_PATH+"/Version") || !Exists(BIN_PATH+"/iptv") {
+		os.Remove(BIN_PATH + "/iptv")
+		os.Remove(BIN_PATH + "/Version")
+		if err := os.MkdirAll(BIN_PATH, 0755); err != nil {
+			log.Println("/config/bin/ 创建目录失败:" + err.Error())
+			return errors.New("/config/bin/ 创建目录失败,请检查目录权限并删除/config/bin/和/config/updata目录")
+		}
+		if err := copyAndChmod("/app/iptv", BIN_PATH+"/iptv"); err != nil {
+			log.Println("复制文件iptv失败:" + err.Error())
+			return errors.New("复制文件iptv失败,请检查目录权限并删除/config/bin/和/config/updata目录")
+		}
+		if err := copyAndChmod("/app/Version", BIN_PATH+"/Version"); err != nil {
+			log.Println("复制文件Version失败:" + err.Error())
+			return errors.New("复制文件Version失败,请检查目录权限并删除/config/bin/和/config/updata目录")
+		}
+		return nil
+	}
+	return nil
+}
+
 // 启动引擎
 func startLicense() bool {
 	if LICENSE_CMD != nil {
 		return true
 	}
 	log.Println("启动引擎...")
-	if !Exists(BIN_PATH + "/Version_lic") {
-		os.Remove(BIN_PATH + "/license")
-		os.Remove(BIN_PATH + "/Version_lic")
-	}
-	if !Exists(BIN_PATH + "/license") {
-		if err := os.MkdirAll(BIN_PATH, 0755); err != nil {
-			log.Fatal("/config/bin/创建目录失败,请检查目录权限并删除/config/bin/和/config/updata目录")
-		}
-		if err := copyAndChmod("/app/license", BIN_PATH+"/license"); err != nil {
-			log.Fatal("复制文件license失败,请检查目录权限并删除/config/bin/和/config/updata目录")
-		}
-		if err := copyAndChmod("/app/Version_lic", BIN_PATH+"/Version_lic"); err != nil {
-			log.Fatal("复制文件Version_lic失败,请检查目录权限并删除/config/bin/和/config/updata目录")
-		}
+
+	if checkLicense() != nil {
+		log.Fatal("引擎初始化失败")
+		return false
 
 	}
+
 	cmd := exec.Command(BIN_PATH + "/license")
 
 	// 创建日志文件并覆盖原有内容
@@ -97,12 +147,12 @@ func startLicense() bool {
 	return waitLicense()
 }
 
-// 等待引擎可用 (通过 WebSocket ping)
+// 等待引擎启动完成 (通过 WebSocket ping)
 func waitLicense() bool {
 	url := "ws://127.0.0.1:81/ws"
 	timeout := 60 * time.Second
 	start := time.Now()
-	log.Println("等待引擎可用...")
+	log.Println("等待引擎启动完成...")
 
 	for {
 		ws, err := websocket.Dial(url, "", "http://127.0.0.1:81/")
@@ -111,7 +161,7 @@ func waitLicense() bool {
 			msg := []byte("ping")
 			if _, err := ws.Write(msg); err == nil {
 				ws.Close()
-				log.Println("引擎可用")
+				log.Println("引擎启动完成")
 				return true
 			}
 			ws.Close()
@@ -131,21 +181,11 @@ func startIPTV() bool {
 		return true
 	}
 	log.Println("启动 IPTV...")
-	if !Exists(BIN_PATH + "/Version") {
-		os.Remove(BIN_PATH + "/iptv")
-		os.Remove(BIN_PATH + "/Version")
+	if checkIptv() != nil {
+		log.Fatal("管理系统初始化失败")
+		return false
 	}
-	if !Exists(BIN_PATH + "/iptv") {
-		if err := os.MkdirAll(BIN_PATH, 0755); err != nil {
-			log.Fatal("/config/bin/ 创建目录失败,请检查目录权限并删除/config/bin/和/config/updata目录")
-		}
-		if err := copyAndChmod("/app/iptv", BIN_PATH+"/iptv"); err != nil {
-			log.Fatal("复制文件iptv失败,请检查目录权限并删除/config/bin/和/config/updata目录")
-		}
-		if err := copyAndChmod("/app/Version", BIN_PATH+"/Version"); err != nil {
-			log.Fatal("复制文件Version失败,请检查目录权限并删除/config/bin/和/config/updata目录")
-		}
-	}
+
 	cmd := exec.Command(BIN_PATH + "/iptv")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -181,32 +221,43 @@ func updata(boot bool) bool {
 		log.Println("系统启动中...")
 		licUp := false
 		webUp := false
+
+		if !Exists(BIN_PATH+"/Version_lic") || !Exists(BIN_PATH+"/license") {
+			os.Remove(BIN_PATH + "/license")
+			os.Remove(BIN_PATH + "/Version_lic")
+			log.Println("引擎文件不完整，初始化引擎")
+			startLicense()
+		}
+
+		if !Exists(BIN_PATH+"/Version") || !Exists(BIN_PATH+"/iptv") {
+			os.Remove(BIN_PATH + "/iptv")
+			os.Remove(BIN_PATH + "/Version")
+			log.Println("管理系统文件不完整，初始化管理系统")
+			startIPTV()
+			return true
+		}
+
 		// 判断版本
 		newLicVersion := ReadFile("/app/Version_lic")
 		curLicVersion := ReadFile(BIN_PATH + "/Version_lic")
 		if curLicVersion != "" {
 			if curLicVersion == "local" {
-				log.Println("引擎为本地版本，跳过")
+				log.Println("引擎为本地版本，跳过版本检查")
 				startLicense()
 			}
 			switch newLicVersion {
 			case "":
-				log.Println("引擎版本文件不存在，跳过")
-				if LICENSE_CMD == nil {
-					startLicense()
-				}
-
+				log.Fatal("镜像引擎版本文件不存在") //				return false
+				return false
 			case curLicVersion:
-				log.Println("引擎为最新版本，跳过更新")
-				if LICENSE_CMD == nil {
-					startLicense()
-				}
+				startLicense()
 			default:
-				check, err := isNewer(newLicVersion, curLicVersion, 3)
+				check, err := isNewer(newLicVersion, curLicVersion, 3, true)
 				if err != nil {
-					log.Println(err.Error())
-					if LICENSE_CMD == nil {
+					if err.Error() == "low" {
 						startLicense()
+					} else {
+						licUp = true
 					}
 				}
 				if check {
@@ -218,32 +269,13 @@ func updata(boot bool) bool {
 		}
 
 		if licUp {
-			// 更新 license
-			license := "/app/license"
-			if _, err := os.Stat(license); err == nil {
-				log.Println("复制引擎...")
-				if LICENSE_CMD != nil {
-					_ = LICENSE_CMD.Process.Kill()
-					_ = LICENSE_CMD.Wait()
-					LICENSE_CMD = nil
-				}
-				if err := os.MkdirAll(BIN_PATH, 0755); err != nil {
-					log.Fatalln("复制启动文件失败，请检查目录权限")
-				}
-				dst := BIN_PATH + "/license"
-				if err := copyAndChmod(license, dst); err != nil {
-					log.Fatalf("复制 license 失败: %v", err)
-				}
-				ver := BIN_PATH + "/Version_lic"
-				if err := copyAndChmod("/app/Version_lic", ver); err != nil {
-					log.Fatalf("复制 Version_lic 失败: %v", err)
-				}
-				startLicense()
-
-			} else {
-				log.Fatalln("/app目录中 引擎文件不存在")
+			if LICENSE_CMD != nil {
+				_ = LICENSE_CMD.Process.Kill()
+				_ = LICENSE_CMD.Wait()
+				LICENSE_CMD = nil
 			}
-		} else {
+			os.Remove(BIN_PATH + "/license")
+			os.Remove(BIN_PATH + "/Version_lic")
 			startLicense()
 		}
 
@@ -251,28 +283,22 @@ func updata(boot bool) bool {
 		curWebVersion := ReadFile(BIN_PATH + "/Version")
 		if curWebVersion != "" {
 			if curWebVersion == "local" {
-				log.Println("管理系统为本地版本，跳过更新")
+				log.Println("管理系统为本地版本，跳过版本检查")
 				return startIPTV()
 			}
 			switch newWebVersion {
 			case "":
-				log.Println("管理系统版本文件不存在，跳过")
-				if IPTV_CMD == nil {
-					return startIPTV()
-				}
-
+				log.Fatal("镜像系统文件不存在")
+				return false
 			case curWebVersion:
-				log.Println("管理系统为最新版本，跳过更新")
-				if IPTV_CMD == nil {
-					return startIPTV()
-				}
+				return startIPTV()
 			default:
-				check, err := isNewer(newWebVersion, curWebVersion, 4)
+				check, err := isNewer(newWebVersion, curWebVersion, 4, true)
 				if err != nil {
-					log.Println(err.Error())
-					if IPTV_CMD == nil {
+					if err.Error() == "low" {
 						return startIPTV()
 					}
+					webUp = true
 				}
 				if check {
 					webUp = true
@@ -283,56 +309,34 @@ func updata(boot bool) bool {
 		}
 
 		if webUp {
-			// 更新 IPTV
-			iptv := "/app/iptv"
-			if _, err := os.Stat(iptv); err == nil {
-				log.Println("复制 IPTV...")
-				if IPTV_CMD != nil {
-					_ = IPTV_CMD.Process.Kill()
-					_ = IPTV_CMD.Wait()
-					IPTV_CMD = nil
-				}
-				if err := os.MkdirAll(BIN_PATH, 0755); err != nil {
-					log.Fatalln("复制启动文件失败，请检查目录权限  ,请检查目录权限并删除/config/bin/和/config/updata目录")
-				}
-				dst := BIN_PATH + "/iptv"
-				if err := copyAndChmod(iptv, dst); err != nil {
-					log.Fatalf("复制 IPTV 失败: %v    ,请检查目录权限并删除/config/bin/和/config/updata目录", err)
-				}
-				ver := BIN_PATH + "/Version"
-				if err := copyAndChmod("/app/Version", ver); err != nil {
-					log.Fatalf("复制 Version 失败: %v    ,请检查目录权限并删除/config/bin/和/config/updata目录", err)
-				}
-				return startIPTV()
-
-			} else {
-				log.Fatalln("/app目录中 管理系统文件不存在")
+			if IPTV_CMD != nil {
+				_ = IPTV_CMD.Process.Kill()
+				_ = IPTV_CMD.Wait()
+				IPTV_CMD = nil
 			}
-		} else {
+			os.Remove(BIN_PATH + "/iptv")
+			os.Remove(BIN_PATH + "/Version")
 			return startIPTV()
 		}
 	}
 	if _, err := os.Stat(WATCH_DIR); os.IsNotExist(err) {
 		log.Println("更新目录不存在，跳过")
-		if LICENSE_CMD == nil {
-			startLicense()
-		}
-		if IPTV_CMD == nil {
-			startIPTV()
-		}
+		startLicense()
+		startIPTV()
 		return false
 	}
+	if !Exists(WATCH_DIR+"/Version_lic") || !Exists(WATCH_DIR+"/license") {
+		os.Remove(WATCH_DIR + "/license")
+		os.Remove(WATCH_DIR + "/Version_lic")
+		log.Println("引擎更新文件不完整，跳过")
+		startLicense()
+	}
 
-	if (!Exists(WATCH_DIR+"/Version") || !Exists(WATCH_DIR+"/iptv")) &&
-		(!Exists(WATCH_DIR+"/Version_lic") || !Exists(WATCH_DIR+"/license")) {
-		log.Println("更新文件不完整，跳过")
-		if LICENSE_CMD == nil {
-			startLicense()
-		}
-		if IPTV_CMD == nil {
-			startIPTV()
-		}
-		return false
+	if !Exists(WATCH_DIR+"/Version") || !Exists(WATCH_DIR+"/iptv") {
+		os.Remove(WATCH_DIR + "/iptv")
+		os.Remove(WATCH_DIR + "/Version")
+		log.Println("管理系统更新文件不完整，跳过")
+		startIPTV()
 	}
 
 	log.Println("开始更新")
@@ -347,22 +351,15 @@ func updata(boot bool) bool {
 	switch newLicVersion {
 	case "":
 		log.Println("引擎版本文件不存在，跳过")
-		if LICENSE_CMD == nil {
-			startLicense()
-		}
-
+		startLicense()
 	case curLicVersion:
 		log.Println("引擎为最新版本，跳过更新")
-		if LICENSE_CMD == nil {
-			startLicense()
-		}
+		startLicense()
 	default:
-		check, err := isNewer(newLicVersion, curLicVersion, 3)
+		check, err := isNewer(newLicVersion, curLicVersion, 3, false)
 		if err != nil {
 			log.Println(err.Error())
-			if LICENSE_CMD == nil {
-				startLicense()
-			}
+			startLicense()
 		}
 		if check {
 			licUp = true
@@ -373,38 +370,41 @@ func updata(boot bool) bool {
 		// 更新 license
 		license := WATCH_DIR + "/license"
 		verUpdate := WATCH_DIR + "/Version_lic"
-		if _, err := os.Stat(license); err == nil {
-			log.Println("更新引擎...")
-
-			if err := os.MkdirAll(BIN_PATH, 0755); err != nil {
-				log.Fatalln("复制启动文件失败，请检查目录权限")
-			}
-			ver := BIN_PATH + "/Version_lic"
-			if err := copyAndChmod(verUpdate, ver); err != nil {
-				log.Printf("复制 Version_lic 失败: %v   ,请检查目录权限并删除/config/bin/和/config/updata目录", err)
-				return false
-			}
-
+		_, err1 := os.Stat(license)
+		_, err2 := os.Stat(verUpdate)
+		if err1 == nil && err2 == nil {
 			if LICENSE_CMD != nil {
 				_ = LICENSE_CMD.Process.Kill()
 				_ = LICENSE_CMD.Wait()
 				LICENSE_CMD = nil
 			}
-			dst := BIN_PATH + "/license"
-			if err := copyAndChmod(license, dst); err != nil {
-				log.Printf("复制 license 失败: %v  ,请检查目录权限并删除/config/bin/和/config/updata目录", err)
-			} else {
-				startLicense()
-			}
-		} else {
-			log.Println("引擎文件不存在，跳过更新")
-			if LICENSE_CMD == nil {
-				startLicense()
-			}
+			os.Remove(BIN_PATH + "/license")
+			os.Remove(BIN_PATH + "/Version_lic")
 
-		}
-	} else {
-		if LICENSE_CMD == nil {
+			log.Println("更新引擎...")
+
+			if err := os.MkdirAll(BIN_PATH, 0755); err != nil {
+				log.Fatalln("复制启动文件失败，请检查目录权限")
+			}
+			lic := BIN_PATH + "/license"
+			if err := copyAndChmod(license, lic); err != nil {
+				os.Remove(WATCH_DIR + "/license")
+				os.Remove(WATCH_DIR + "/Version_lic")
+				log.Printf("复制 引擎文件 失败: %v", err)
+			} else {
+				ver := BIN_PATH + "/Version_lic"
+				if err := copyAndChmod(verUpdate, ver); err != nil {
+					os.Remove(WATCH_DIR + "/license")
+					os.Remove(WATCH_DIR + "/Version_lic")
+					log.Printf("复制 引擎版本文件 失败: %v", err)
+				}
+			}
+			startLicense()
+
+		} else {
+			os.Remove(WATCH_DIR + "/license")
+			os.Remove(WATCH_DIR + "/Version_lic")
+			log.Println("引擎文件不存在，跳过更新")
 			startLicense()
 		}
 	}
@@ -414,22 +414,16 @@ func updata(boot bool) bool {
 	switch newWebVersion {
 	case "":
 		log.Println("管理系统版本文件不存在，跳过")
-		if IPTV_CMD == nil {
-			return startIPTV()
-		}
+		startIPTV()
 
 	case curWebVersion:
 		log.Println("管理系统为最新版本，跳过更新")
-		if IPTV_CMD == nil {
-			return startIPTV()
-		}
+		startIPTV()
 	default:
-		check, err := isNewer(newWebVersion, curWebVersion, 4)
+		check, err := isNewer(newWebVersion, curWebVersion, 4, false)
 		if err != nil {
 			log.Println(err.Error())
-			if IPTV_CMD == nil {
-				return startIPTV()
-			}
+			startIPTV()
 		}
 		if check {
 			webUp = true
@@ -440,38 +434,44 @@ func updata(boot bool) bool {
 		// 更新 IPTV
 		iptv := WATCH_DIR + "/iptv"
 		verUpdate := WATCH_DIR + "/Version"
-		if _, err := os.Stat(iptv); err == nil {
-			log.Println("更新管理系统...")
-
-			if err := os.MkdirAll(BIN_PATH, 0755); err != nil {
-				log.Fatalln("复制启动文件失败，请检查目录权限 ,请检查目录权限并删除/config/bin/和/config/updata目录")
-			}
-			ver := BIN_PATH + "/Version"
-			if err := copyAndChmod(verUpdate, ver); err != nil {
-				log.Printf("复制 Version 失败: %v    ,请检查目录权限并删除/config/bin/和/config/updata目录", err)
-				return false
-			}
-
+		_, err1 := os.Stat(iptv)
+		_, err2 := os.Stat(verUpdate)
+		if err1 == nil && err2 == nil {
 			if IPTV_CMD != nil {
 				_ = IPTV_CMD.Process.Kill()
 				_ = IPTV_CMD.Wait()
 				IPTV_CMD = nil
 			}
+			os.Remove(BIN_PATH + "/iptv")
+			os.Remove(BIN_PATH + "/Version")
+
+			log.Println("更新管理系统...")
+
+			if err := os.MkdirAll(BIN_PATH, 0755); err != nil {
+				log.Fatalln("复制启动文件失败，请检查目录权限")
+			}
+
 			dst := BIN_PATH + "/iptv"
 			if err := copyAndChmod(iptv, dst); err != nil {
-				log.Printf("复制 IPTV 失败: %v    ,请检查目录权限并删除/config/bin/和/config/updata目录", err)
+				os.Remove(WATCH_DIR + "/iptv")
+				os.Remove(WATCH_DIR + "/Version")
+				log.Printf("复制 管理系统文件 失败: %v ", err)
+
 			} else {
-				return startIPTV()
+				ver := BIN_PATH + "/Version"
+				if err := copyAndChmod(verUpdate, ver); err != nil {
+					os.Remove(WATCH_DIR + "/iptv")
+					os.Remove(WATCH_DIR + "/Version")
+					log.Printf("复制 管理系统版本文件 失败: %v", err)
+					return false
+				}
 			}
+			startIPTV()
 		} else {
-			log.Println("IPTV 文件不存在，跳过更新")
-			if IPTV_CMD == nil {
-				return startIPTV()
-			}
-		}
-	} else {
-		if IPTV_CMD == nil {
-			return startIPTV()
+			os.Remove(WATCH_DIR + "/iptv")
+			os.Remove(WATCH_DIR + "/Version")
+			log.Println("管理系统 文件不存在，跳过更新")
+			startIPTV()
 		}
 	}
 
@@ -509,7 +509,7 @@ func copyAndChmod(src, dst string) error {
 	return nil
 }
 
-func isNewer(newVer, oldVer string, vLen int) (bool, error) {
+func isNewer(newVer, oldVer string, vLen int, boot bool) (bool, error) {
 	if newVer == oldVer {
 		return false, errors.New("已是最新版本，不更新")
 	}
@@ -530,15 +530,16 @@ func isNewer(newVer, oldVer string, vLen int) (bool, error) {
 		fmt.Sscanf(np[i], "%d", &a)
 		fmt.Sscanf(op[i], "%d", &b)
 		if a > b {
-			if i <= 1 && vLen == 4 {
+			if i <= 1 && vLen == 4 && !boot {
 				return false, errors.New("管理系统版本更新内容较大或基础镜像更新，不支持自动升级，请升级镜像")
-			} else if i == 0 && vLen == 3 {
+			} else if i == 0 && vLen == 3 && !boot {
 				return false, errors.New("引擎版本更新内容较大或基础镜像更新，不支持自动升级，请升级镜像")
 			}
 			return true, nil
 		}
 		if a < b {
-			return false, errors.New("新版本低于当前版本，不更新")
+			log.Println("新版本低于当前版本，不更新")
+			return false, errors.New("low")
 		}
 	}
 	return false, errors.New("版本号读取失败")
