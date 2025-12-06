@@ -35,6 +35,23 @@ func main() {
 		return
 	}
 	os.MkdirAll("/tmp/check_start_ram", 0755)
+
+	if !until.Exists("/config") {
+		log.Println("请映射config文件夹到容器/config中")
+		return
+	}
+
+	err := os.Chmod("/config", 0777)
+	if err != nil {
+		log.Println("/config文件夹权限设置失败,请手动设置")
+		return
+	}
+	err = until.FixPerm("/config")
+	if err != nil {
+		log.Println("/config文件夹权限设置失败,请手动设置")
+		return
+	}
+
 	// 启动服务器
 	if updata(true) {
 		// 监听升级信号
@@ -53,15 +70,16 @@ func licRestart(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	_ = LICENSE_CMD.Process.Kill()
-	_ = LICENSE_CMD.Wait()
-	LICENSE_CMD = nil
+	if LICENSE_CMD != nil {
+		_ = LICENSE_CMD.Process.Kill()
+		_ = LICENSE_CMD.Wait()
+		LICENSE_CMD = nil
+	}
+
 	if startLicense() {
-		if waitLicense() {
-			log.Println("引擎重启成功")
-			fmt.Fprintln(w, "OK")
-			return
-		}
+		log.Println("引擎重启成功")
+		fmt.Fprintln(w, "OK")
+		return
 	}
 	fmt.Fprintln(w, "FAIL")
 }
@@ -116,6 +134,12 @@ func checkIptv() error {
 
 // 启动引擎
 func startLicense() bool {
+
+	if !until.Exists("/config/iptv.db") || !until.Exists("/config/config.yml") || !until.Exists("/config/install.lock") {
+		log.Println("系统未安装，跳过启动引擎")
+		return false
+	}
+
 	if LICENSE_CMD != nil {
 		return true
 	}
@@ -124,7 +148,6 @@ func startLicense() bool {
 	if checkLicense() != nil {
 		log.Fatal("引擎初始化失败")
 		return false
-
 	}
 
 	cmd := exec.Command(BIN_PATH + "/license")
@@ -266,6 +289,10 @@ func updata(boot bool) bool {
 			}
 		} else {
 			licUp = true
+			if !until.Exists("/config/iptv.db") || !until.Exists("/config/config.yml") || !until.Exists("/config/install.lock") {
+				licUp = false
+			}
+
 		}
 
 		if licUp {

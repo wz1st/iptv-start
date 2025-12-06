@@ -3,6 +3,7 @@ package until
 import (
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/shirou/gopsutil/mem"
@@ -148,4 +149,24 @@ func CheckRam() bool {
 	}
 	log.Printf("可用内存: %d MB (%d GB)\n", vmStat.Available/1024/1024, vmStat.Available/1024/1024/1024)
 	return vmStat.Available < 256*1024*1024
+}
+
+func Exists(path string) bool {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true
+	}
+	if os.IsNotExist(err) {
+		return false
+	}
+	return false
+}
+
+func FixPerm(path string) error {
+	return filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Chmod(p, 0777)
+	})
 }
