@@ -543,6 +543,15 @@ func isNewer(newVer, oldVer string, vLen int, boot bool) (bool, error) {
 	newVer = strings.TrimPrefix(newVer, "v")
 	oldVer = strings.TrimPrefix(oldVer, "v")
 
+	if strings.Contains(newVer, "beta") && strings.Contains(oldVer, "beta") {
+		newVer = strings.TrimSuffix(newVer, "beta")
+		oldVer = strings.TrimSuffix(oldVer, "beta")
+	} else if strings.Contains(newVer, "beta") {
+		return false, errors.New("新版为beta版本，不更新")
+	} else if strings.Contains(oldVer, "beta") {
+		return false, errors.New("beta版本支持不更新")
+	}
+
 	np := strings.Split(newVer, ".")
 	op := strings.Split(oldVer, ".")
 	for len(np) < vLen {
