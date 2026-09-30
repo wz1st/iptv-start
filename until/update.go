@@ -20,6 +20,9 @@ var updateTargets = []string{"iptv", "engine"}
 // 若照应用，它会盖掉 4.x 镜像里自带的、能认 `-host` 的新 api
 // ⇒ 新启动器 + 旧 api，api 一启动就 `flag provided but not defined: -host` 秒退。
 // 所以：**升级包版本不高于镜像内置版本的一律不应用**，并在日志里说明原因。
+//
+// 产物读不出自身版本号时（被换坏 / 不可执行），基准**直接取镜像内置版本** ——
+// 否则会判成"当前二进制不可执行，按需应用"，等于主动让旧包把产物再降一级。
 func ShouldApplyUpdate(binDir, webDir, updataDir string) (bool, string) {
 	if !Exists(updataDir) {
 		return false, "升级目录不存在，跳过"
@@ -44,11 +47,20 @@ func ShouldApplyUpdate(binDir, webDir, updataDir string) (bool, string) {
 		// 基准换成"镜像内置版本"与"当前产物版本"里较高的那个。
 		base := imageVerFor(name, imgAPI, imgEngine)
 		if base != "" {
-			if cmp, ok := CompareVersion(base, cur); ok && cmp > 0 {
+			switch {
+			case cur == "":
+				// 产物读不出（不存在 / 不可执行 / 被换坏）。**必须**拿镜像内置版本
+				// 当基准：否则会落到下面"当前二进制不可执行，按需应用"那句，把卷里
+				// 的旧包怼上去 —— 正是 3.x 装 4.x 时 `-host` 崩溃的成因。
 				cur = base
+			default:
+				if cmp, ok := CompareVersion(base, cur); ok && cmp > 0 {
+					cur = base
+				}
 			}
 		}
 		if cur == "" {
+			// 走到这里说明镜像里连版本清单都没有（老镜像），只能按需应用。
 			return true, fmt.Sprintf("%s 升级包版本 %s，当前二进制不可执行，按需应用", name, up)
 		}
 		cmp, ok := CompareVersion(up, cur)
@@ -69,8 +81,15 @@ func ShouldApplyUpdate(binDir, webDir, updataDir string) (bool, string) {
 		up := BundleVersion(bundle)
 		cur := WebVersion(webDir)
 		if imgFront != "" {
-			if cmp, ok := CompareVersion(imgFront, cur); ok && cmp > 0 {
+			switch {
+			case cur == "":
+				// 站点没有版本标记（被换坏 / 被清空）⇒ 同样拿镜像内置版本兜住，
+				// 免得落到下面"当前站点无版本标记，按需应用"去降级。
 				cur = imgFront
+			default:
+				if cmp, ok := CompareVersion(imgFront, cur); ok && cmp > 0 {
+					cur = imgFront
+				}
 			}
 		}
 		switch {

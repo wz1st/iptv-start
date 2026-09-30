@@ -17,7 +17,7 @@ import (
 )
 
 // 升级服务（启动器）—— 容器 PID 1。
-var VERSION = "v3.2.0"
+var VERSION = "v3.2.1"
 
 // 环境预检标记文件：镜像里可能还有旧版 iptv，它会检查这两个文件来
 // 跳过重复检查。新版 iptv 走 IPTV_PRECHECKED 环境变量，两条路都留着。
@@ -172,8 +172,21 @@ func (a *app) Installed() bool {
 	return a.installed
 }
 
-// applyPendingUpdate 在启动阶段应用"上次没来得及生效"的升级包。
+// applyPendingUpdate 在启动阶段维护运行目录里的产物，再应用"上次没来得及生效"的升级包。
 func (a *app) applyPendingUpdate() {
+	// 先把运行目录里的产物核对/恢复到镜像内置版本。
+	// /app 是容器可写层，docker restart 抹不掉上一轮升级写进去的东西 ⇒
+	// 产物被换坏或被降级后，只有重建容器才回得来。这一步把它变成自动的。
+	if healed, err := until.SelfHealBinaries(a.cfg.BinDir); err != nil {
+		log.Println("产物自愈失败:", err)
+	} else if len(healed) > 0 {
+		log.Printf("⚠️ 运行目录产物与镜像内置不一致，已用镜像副本恢复: %s", until.JoinList(healed))
+	}
+	// 再清掉低于镜像版本的陈旧升级包：留着它们只会每次启动都被判"降级"。
+	if removed := until.CleanStaleUpdata(a.cfg.BinDir, a.cfg.UpdataDir()); len(removed) > 0 {
+		log.Println("已清理低于镜像版本的陈旧升级包:", until.JoinList(removed))
+	}
+
 	apply, why := until.ShouldApplyUpdate(a.cfg.BinDir, a.cfg.WebDir(), a.cfg.UpdataDir())
 	log.Println("检查待应用更新:", why)
 	if !apply {
