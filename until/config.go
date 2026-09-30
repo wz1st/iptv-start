@@ -102,11 +102,6 @@ func (c *Config) EngineBin() string {
 // EngineLog 是引擎日志。后台"引擎日志"页读的就是它，故仍放在 /config 下。
 func (c *Config) EngineLog() string { return filepath.Join(c.ConfDir, "engine.log") }
 
-// UpdataDir 是在线升级包的落地目录（由 iptv-api 下载，见 until/updataUntil.go）。
-func (c *Config) UpdataDir() string {
-	return envStr("IPTV_UPDATA_DIR", filepath.Join(c.ConfDir, "updata"))
-}
-
 // IsInstalled 判断系统是否已完成安装。
 func IsInstalled(confDir string) bool {
 	return Exists(filepath.Join(confDir, "iptv.db")) &&

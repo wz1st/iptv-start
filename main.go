@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -17,7 +16,7 @@ import (
 )
 
 // 升级服务（启动器）—— 容器 PID 1。
-var VERSION = "v3.2.1"
+var VERSION = "v3.2.2"
 
 // 环境预检标记文件：镜像里可能还有旧版 iptv，它会检查这两个文件来
 // 跳过重复检查。新版 iptv 走 IPTV_PRECHECKED 环境变量，两条路都留着。
@@ -34,7 +33,6 @@ type app struct {
 	api       *until.Child
 	engine    *until.Child
 	nginx     *until.Child
-	lastUpd   string
 
 	startedAt time.Time
 }
@@ -140,7 +138,7 @@ func (a *app) init() error {
 	}
 
 	a.refreshInstalled()
-	a.applyPendingUpdate()
+	a.selfHeal()
 
 	webVer, frontVer, engineVer := until.VersionSummary(cfg.BinDir, cfg.WebDir(), cfg.EngineBin())
 	if a.Installed() {
@@ -172,43 +170,18 @@ func (a *app) Installed() bool {
 	return a.installed
 }
 
-// applyPendingUpdate 在启动阶段维护运行目录里的产物，再应用"上次没来得及生效"的升级包。
-func (a *app) applyPendingUpdate() {
-	// 先把运行目录里的产物核对/恢复到镜像内置版本。
-	// /app 是容器可写层，docker restart 抹不掉上一轮升级写进去的东西 ⇒
-	// 产物被换坏或被降级后，只有重建容器才回得来。这一步把它变成自动的。
+// selfHeal 在启动阶段把运行目录里的产物核对/恢复到镜像内置版本。
+//
+// /app 是容器可写层，docker restart 抹不掉上一轮被写进去的东西 ⇒
+// 产物被换坏或被降级后，只有重建容器才回得来。这一步把它变成自动的，
+// 也就是定制分支"默认使用镜像内置产物"的落点：在线升级已整体删除，
+// 运行目录里就只该有镜像那一份。
+func (a *app) selfHeal() {
 	if healed, err := until.SelfHealBinaries(a.cfg.BinDir); err != nil {
 		log.Println("产物自愈失败:", err)
 	} else if len(healed) > 0 {
 		log.Printf("⚠️ 运行目录产物与镜像内置不一致，已用镜像副本恢复: %s", until.JoinList(healed))
 	}
-	// 再清掉低于镜像版本的陈旧升级包：留着它们只会每次启动都被判"降级"。
-	if removed := until.CleanStaleUpdata(a.cfg.BinDir, a.cfg.UpdataDir()); len(removed) > 0 {
-		log.Println("已清理低于镜像版本的陈旧升级包:", until.JoinList(removed))
-	}
-
-	apply, why := until.ShouldApplyUpdate(a.cfg.BinDir, a.cfg.WebDir(), a.cfg.UpdataDir())
-	log.Println("检查待应用更新:", why)
-	if !apply {
-		return
-	}
-	applied, err := until.ApplyUpdate(a.cfg.BinDir, a.cfg.WebDir(), a.cfg.UpdataDir())
-	if err != nil {
-		log.Println("应用升级包失败:", err)
-		return
-	}
-	if len(applied) == 0 {
-		log.Println("升级包内没有可应用的文件，忽略")
-		return
-	}
-	log.Println("已应用升级包:", until.JoinList(applied))
-	a.setLastUpdate(applied)
-}
-
-func (a *app) setLastUpdate(applied []string) {
-	a.mu.Lock()
-	a.lastUpd = until.JoinList(applied)
-	a.mu.Unlock()
 }
 
 // 子进程编排
@@ -348,7 +321,6 @@ func (a *app) serveAdmin() {
 	// 改造前的路径，保留为别名：镜像里那半份"新旧混编"的状态
 	// （例如只替换了 iptv 没替换 start）不至于因为改名而彻底断链。
 	mux.HandleFunc("/licRestart", a.handleEngineRestart)
-	mux.HandleFunc("/update", a.handleUpdate)
 	mux.HandleFunc("/status", a.handleStatus)
 	mux.HandleFunc("/healthz", a.handleHealthz)
 
@@ -357,11 +329,11 @@ func (a *app) serveAdmin() {
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	log.Printf("管理接口监听 %s (/engineRestart /licRestart /update /status /healthz)", a.cfg.AdminAddr)
+	log.Printf("管理接口监听 %s (/engineRestart /licRestart /status /healthz)", a.cfg.AdminAddr)
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			// 这里不退出进程：管理接口不可用只影响在线升级与引擎重启，
+			// 这里不退出进程：管理接口不可用只影响引擎重启，
 			// 管理系统本身仍可用，退出反而把能用的服务一起带走了。
 			log.Println("管理接口启动失败:", err)
 		}
@@ -395,55 +367,10 @@ func (a *app) handleEngineRestart(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "OK")
 }
 
-// handleUpdate 应用在线升级包并重启受影响的进程。
-func (a *app) handleUpdate(w http.ResponseWriter, r *http.Request) {
-	log.Println("收到在线更新请求")
-
-	applied, err := until.ApplyUpdate(a.cfg.BinDir, a.cfg.WebDir(), a.cfg.UpdataDir())
-	if err != nil {
-		log.Println("在线更新失败:", err)
-		fmt.Fprintln(w, "FAIL: "+err.Error())
-		return
-	}
-	if len(applied) == 0 {
-		log.Println("升级包里没有可应用的文件，忽略")
-		fmt.Fprintln(w, "OK")
-		return
-	}
-
-	log.Println("在线更新完成:", until.JoinList(applied))
-	a.setLastUpdate(applied)
-	a.restartUpdated(applied)
-	fmt.Fprintln(w, "OK")
-}
-
-// restartUpdated 重启被替换过二进制的子进程。
-// 必须重启才生效：运行中的进程持有的是旧 inode（rename 是原子的）。
-func (a *app) restartUpdated(applied []string) {
-	for _, name := range applied {
-		switch name {
-		case "iptv":
-			if c := a.apiChild(); c != nil {
-				log.Println("管理系统已更新，重启生效")
-				_ = c.Restart()
-			}
-		case "engine":
-			if c := a.engineChild(); c != nil {
-				log.Println("引擎已更新，重启生效")
-				_ = c.Restart()
-			}
-		}
-	}
-}
-
 // handleStatus 输出 JSON 状态快照，用于排障。
 func (a *app) handleStatus(w http.ResponseWriter, r *http.Request) {
 	a.refreshInstalled()
 	apiVer, frontVer, engineVer := until.VersionSummary(a.cfg.BinDir, a.cfg.WebDir(), a.cfg.EngineBin())
-
-	a.mu.Lock()
-	lastUpd := a.lastUpd
-	a.mu.Unlock()
 
 	resp := map[string]interface{}{
 		"version":       VERSION,
@@ -461,9 +388,6 @@ func (a *app) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"adminAddr": a.cfg.AdminAddr,
 		"binDir":    a.cfg.BinDir,
 		"configDir": a.cfg.ConfDir,
-	}
-	if lastUpd != "" {
-		resp["lastUpdate"] = lastUpd
 	}
 	if c := a.apiChild(); c != nil {
 		resp["api"] = c.Status()
@@ -534,18 +458,11 @@ func (a *app) summary() string {
 		return parent + "已停止"
 	}
 
-	a.mu.Lock()
-	upd := a.lastUpd
-	a.mu.Unlock()
-
 	s := fmt.Sprintf("安装状态=%s %s %s %s 对外端口=%s",
 		state,
 		desc("引擎=", a.engineChild()),
 		desc("管理系统=", a.apiChild()),
 		desc("nginx=", a.nginxChild()),
 		a.cfg.NginxPort)
-	if upd != "" {
-		s += " 本次已应用更新=" + strings.ReplaceAll(upd, "、", ",")
-	}
 	return s
 }

@@ -1,11 +1,7 @@
 package until
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
-	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -92,43 +88,4 @@ func ImageVersions(binDir string) (api, front, engine string) {
 		}
 	}
 	return api, front, engine
-}
-
-// BundleVersion 从**不解包**地读前端升级包（webdist.tar.gz）里的版本号。
-func BundleVersion(tarPath string) string {
-	f, err := os.Open(tarPath)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return ""
-	}
-	defer gz.Close()
-
-	tr := tar.NewReader(gz)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			return ""
-		}
-		if err != nil {
-			return ""
-		}
-		if hdr.Typeflag != tar.TypeReg {
-			continue
-		}
-		rel, err := safeRelPath(hdr.Name)
-		if err != nil || filepath.Base(rel) != webIndexName {
-			continue
-		}
-		// index.html 只有几 KB，限制一下防止读到畸形头里的巨大 Size。
-		data, err := io.ReadAll(io.LimitReader(tr, 1<<20))
-		if err != nil {
-			return ""
-		}
-		return parseWebVersion(string(data))
-	}
 }

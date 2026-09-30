@@ -3,7 +3,6 @@ package until
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -117,49 +116,5 @@ func TestVersionFallbackNote(t *testing.T) {
 	empty := t.TempDir()
 	if fell := VersionFallbackNote(empty, empty, filepath.Join(empty, "engine")); len(fell) != 0 {
 		t.Errorf("无清单时不应报兜底，实际 %v", fell)
-	}
-}
-
-// 防降级：3.x 时代遗留的旧升级包不得盖掉 4.x 镜像里自带的新 api。
-//
-// 场景复刻：镜像内置 api=v4.0.0（写在清单里），而 /app/iptv 已被卷里的旧包
-// 换成 v3.9.0（所以"问产物自己"答的是 v3.9.0），卷里还躺着一个 v3.9.0 的包。
-// 旧口径只看"当前产物 v3.9.0"⇒ 判"不低于"⇒ 放行（于是新启动器配旧 api，
-// api 一启动就 `flag provided but not defined: -host` 秒退）；
-// 新口径取 max(内置 v4.0.0, 当前 v3.9.0) = v4.0.0 ⇒ 判为降级，拒绝。
-func TestShouldApplyUpdateRejectsDowngradeVsImage(t *testing.T) {
-	bin := t.TempDir()
-	web := filepath.Join(bin, "web")
-	up := t.TempDir()
-	if err := os.MkdirAll(web, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	write(t, filepath.Join(bin, ImageVersionsFile), "api=v4.0.0\nfront=v4.0.0\nengine=v3.0.0\n")
-	fakeBin(t, filepath.Join(bin, "iptv"), "v3.9.0")
-	fakeBin(t, filepath.Join(up, "iptv"), "v3.9.0")
-
-	apply, why := ShouldApplyUpdate(bin, web, up)
-	if apply {
-		t.Errorf("旧包低于镜像内置版本时应拒绝降级，却放行了（%s）", why)
-	}
-	if !strings.Contains(why, "拒绝降级") {
-		t.Errorf("拒绝原因应说明是降级，实际 %q", why)
-	}
-}
-
-// 防降级不能误伤真升级：高于镜像内置版本的包仍要放行。
-func TestShouldApplyUpdateAllowsRealUpgradeOverImage(t *testing.T) {
-	bin := t.TempDir()
-	web := filepath.Join(bin, "web")
-	up := t.TempDir()
-	if err := os.MkdirAll(web, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	write(t, filepath.Join(bin, ImageVersionsFile), "api=v4.0.0\nfront=v4.0.0\nengine=v3.0.0\n")
-	fakeBin(t, filepath.Join(bin, "iptv"), "v4.0.0")
-	fakeBin(t, filepath.Join(up, "iptv"), "v4.1.0")
-
-	if apply, why := ShouldApplyUpdate(bin, web, up); !apply {
-		t.Errorf("高于镜像内置版本的真升级应放行（%s）", why)
 	}
 }
