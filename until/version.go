@@ -57,6 +57,43 @@ func parseWebVersion(html string) string {
 	return ""
 }
 
+// ImageVersionsFile 是镜像内置的版本清单文件名（放在 BinDir 下）。
+const ImageVersionsFile = "image-versions.txt"
+
+// ImageVersions 读镜像内置的版本清单，返回 api / front / engine 三段版本号。
+//
+// 为什么要它：三个二进制的版本号都靠"问产物自己"（`<bin> -version`）拿。
+// 可一旦产物被换坏、不可执行、或压根不认 -version，问出来的就是空串 ——
+// 那时日志与 /status 只能显示"未知"，排障时看不出这个容器到底是哪版镜像。
+// 这份清单在**构建镜像时**由当时的产物写好、跟着镜像一起走，
+// 所以它总能回答"这个镜像内置的版本是什么"，作为问不出来时的兜底。
+func ImageVersions(binDir string) (api, front, engine string) {
+	text := ReadFileTrim(filepath.Join(binDir, ImageVersionsFile))
+	if text == "" {
+		return "", "", ""
+	}
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		switch strings.TrimSpace(k) {
+		case "api":
+			api = v
+		case "front":
+			front = v
+		case "engine":
+			engine = v
+		}
+	}
+	return api, front, engine
+}
+
 // BundleVersion 从**不解包**地读前端升级包（webdist.tar.gz）里的版本号。
 func BundleVersion(tarPath string) string {
 	f, err := os.Open(tarPath)

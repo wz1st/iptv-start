@@ -17,7 +17,7 @@ import (
 )
 
 // 升级服务（启动器）—— 容器 PID 1。
-var VERSION = "v3.1.0"
+var VERSION = "v3.2.0"
 
 // 环境预检标记文件：镜像里可能还有旧版 iptv，它会检查这两个文件来
 // 跳过重复检查。新版 iptv 走 IPTV_PRECHECKED 环境变量，两条路都留着。
@@ -145,6 +145,11 @@ func (a *app) init() error {
 	webVer, frontVer, engineVer := until.VersionSummary(cfg.BinDir, cfg.WebDir(), cfg.EngineBin())
 	if a.Installed() {
 		log.Printf("系统已安装: 管理系统=%s 前端=%s 引擎=%s", webVer, frontVer, engineVer)
+		// 有组件靠镜像内置清单兜底时单独提示一句：值本身不带标记（保持与正常读取一致），
+		// 但排障要知道"这版本号是产物自己说的，还是清单兜的"。
+		if fell := until.VersionFallbackNote(cfg.BinDir, cfg.WebDir(), cfg.EngineBin()); len(fell) > 0 {
+			log.Printf("⚠️ 以下组件读不出自身版本号，已回落到镜像内置版本: %s", until.JoinList(fell))
+		}
 	} else {
 		log.Println("检测到系统未安装：跳过引擎启动，安装完成后管理系统会自动拉起引擎")
 	}
