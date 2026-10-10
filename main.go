@@ -116,6 +116,16 @@ func (a *app) init() error {
 		return fmt.Errorf("%s 文件夹权限设置失败,请手动设置", cfg.ConfDir)
 	}
 
+	// 数据目录整棵刚被刷成 0777（含私钥），这里把证书目录单独收回来；
+	// 同时把 /config/nginx 建好 —— nginx.conf 对 HTTPS 与 80 跳转用的是
+	// 通配 include，提前有目录可扫，就不依赖"某个文件先被写出来"的启动顺序。
+	if err := until.PrepareCertDir(cfg.ConfDir); err != nil {
+		log.Println("证书目录准备失败（HTTPS 可能不可用）:", err)
+	}
+	if err := until.EnsureNginxDir(cfg.ConfDir); err != nil {
+		log.Println("准备 nginx 配置目录失败（HTTPS 可能不可用）:", err)
+	}
+
 	// 编译 APK 这条链路的前置条件在这里查一次。
 	if !cfg.SkipPreCheck {
 		// 两个端口都要查：nginx 占对外口，iptv-api 占后端口。
