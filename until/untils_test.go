@@ -233,3 +233,83 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) 
 	}
 	t.Fatal("等待超时: " + msg)
 }
+
+// SSL 证书目录：/config 会被 FixPerm 整棵刷成 0777，私钥必须被单独收回 0600。
+func TestPrepareCertDirTightensPrivateKey(t *testing.T) {
+	dir := t.TempDir()
+
+	// 先复刻 FixPerm 的后果：整棵树都是 0777。
+	if err := os.MkdirAll(filepath.Join(dir, CertDirName), 0o777); err != nil {
+		t.Fatal(err)
+	}
+	key := filepath.Join(dir, CertDirName, "server.key")
+	crt := filepath.Join(dir, CertDirName, "server.crt")
+	for _, p := range []string{key, crt} {
+		if err := os.WriteFile(p, []byte("x"), 0o777); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := FixPerm(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := PrepareCertDir(dir); err != nil {
+		t.Fatalf("PrepareCertDir 失败: %v", err)
+	}
+
+	// 目录 0700，文件 0600 —— 私钥不能是对所有人可读的 0777。
+	// 位置式复合字面量（不写字段名）省掉 gofmt 的列对齐，避免格式检查变成噪音。
+	checks := []struct {
+		path string
+		mode os.FileMode
+	}{
+		{filepath.Join(dir, CertDirName), 0o700},
+		{key, 0o600},
+		{crt, 0o600},
+	}
+	for _, c := range checks {
+		info, err := os.Stat(c.path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", c.path, err)
+		}
+		if got := info.Mode().Perm(); got != c.mode {
+			t.Errorf("%s 权限 = %#o，期望 %#o", filepath.Base(c.path), got, c.mode)
+		}
+	}
+}
+
+// 目录不存在时不能报错：没配过 HTTPS 的机器上本来就没有 /config/cert。
+func TestPrepareCertDirCreatesWhenMissing(t *testing.T) {
+	dir := t.TempDir()
+	if err := PrepareCertDir(dir); err != nil {
+		t.Fatalf("空目录下 PrepareCertDir 不该失败: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(dir, CertDirName))
+	if err != nil {
+		t.Fatalf("目录没被创建: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatal("创建出来的不是目录")
+	}
+}
+
+// /config/nginx 必须被建出来：nginx.conf 的 https*.conf / redirect80*.inc
+// 是通配 include，目录不存在时就没得扫。
+func TestEnsureNginxDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := EnsureNginxDir(dir); err != nil {
+		t.Fatalf("EnsureNginxDir 失败: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(dir, "nginx"))
+	if err != nil || !info.IsDir() {
+		t.Fatalf("nginx 目录没被创建: %v", err)
+	}
+	// 幂等：再调一次不该报错
+	if err := EnsureNginxDir(dir); err != nil {
+		t.Fatalf("重复调用失败: %v", err)
+	}
+	// 名字必须与 nginx.conf 里 include 的路径一致，改了这里要同步改配置。
+	if CertDirName != "cert" {
+		t.Fatalf("证书目录名变了（%q），nginx.conf 的 ssl_certificate 路径要同步改", CertDirName)
+	}
+}

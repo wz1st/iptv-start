@@ -35,7 +35,8 @@ func ReadFileTrim(path string) string {
 	return strings.TrimPrefix(s, "\ufeff")
 }
 
-// FixPerm 递归把目录下所有条目的权限设为 0777。
+// FixPerm 把数据目录整棵刷成 0777：/config 里的文件由 root 写的、被 api 的后台
+// 进程改的都有，统一放开省掉一堆"读写失败"的排查。
 func FixPerm(path string) error {
 	return filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -43,6 +44,52 @@ func FixPerm(path string) error {
 		}
 		return os.Chmod(p, 0777)
 	})
+}
+
+// CertDirName 是 SSL 证书目录名（/config/cert）。
+//
+// 单独拎出来是因为它是 FixPerm 的唯一**例外**：私钥不能是 0777。
+const CertDirName = "cert"
+
+// PrepareCertDir 建好 /config/cert 并把权限收紧。
+//
+// 两件事都要做，缺一不可：
+//  1. FixPerm 在上一步把整棵 /config 刷成了 0777（连私钥一起），必须收回来；
+//  2. nginx 的证书路径是**固定**的 /config/cert/server.crt|key，目录不存在时
+//     nginx 只在开启 HTTPS 后才会报错 —— 提前建好可以让首次配置少一类失败。
+//
+// 目录不存在不是错误：没配过 HTTPS 的机器上本来就没有这个目录。
+func PrepareCertDir(confDir string) error {
+	dir := filepath.Join(confDir, CertDirName)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		// 只处理普通文件；chmod 失败不阻断启动（最坏是权限偏松，不是起不来）。
+		if info, err := e.Info(); err == nil && info.Mode().IsRegular() {
+			_ = os.Chmod(filepath.Join(dir, e.Name()), 0o600)
+		}
+	}
+	return nil
+}
+
+// EnsureNginxDir 建好 /config/nginx。
+//
+// nginx.conf 里对 HTTPS 与 80 跳转两处用的是**通配** include
+// （`include /config/nginx/https*.conf;`）：匹配不到文件不会报错，
+// 但目录本身在首次启动时可能还不存在。提前建好，避免依赖"某个文件先被写出来"。
+func EnsureNginxDir(confDir string) error {
+	return os.MkdirAll(filepath.Join(confDir, "nginx"), 0o755)
 }
 
 // copyFileMode 复制文件并设置权限位，用于升级包的原子替换。
