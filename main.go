@@ -17,7 +17,7 @@ import (
 )
 
 // 升级服务（启动器）—— 容器 PID 1。
-var VERSION = "v3.2.1"
+var VERSION = "v3.2.2"
 
 // 环境预检标记文件：镜像里可能还有旧版 iptv，它会检查这两个文件来
 // 跳过重复检查。新版 iptv 走 IPTV_PRECHECKED 环境变量，两条路都留着。

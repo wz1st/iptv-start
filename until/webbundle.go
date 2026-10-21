@@ -137,41 +137,84 @@ func findSiteRoot(dstDir string) (string, error) {
 }
 
 // ApplyWebBundle 把前端升级包应用到 webDir（生产上是 /app/web）。
+//
+// 语义是"用完即清"：成功后备份目录立刻删掉。**参与整笔升级事务的调用方不要用
+// 它**，用 applyWebBundleKeepOld —— 前端与二进制必须当成一笔事务，前端这步
+// 的旧目录要留到二进制也换完才能清。
 func ApplyWebBundle(webDir, tarPath string) error {
+	old, err := applyWebBundleKeepOld(webDir, tarPath)
+	if err != nil {
+		return err
+	}
+	if old != "" {
+		os.RemoveAll(old)
+	}
+	return nil
+}
+
+// applyWebBundleKeepOld 应用前端整包，但**保留**旧目录不删，返回备份目录路径。
+//
+// 为什么多一个"保留旧目录"的版本：整包升级与二进制升级必须当成**一个事务**
+// 做 —— 前端换成功了、api 替换失败时，不能留下"新前端 + 旧 api"的组合
+// （前端可能已经在调新接口，表现为页面能开但一堆功能报错）。所以前端这一步
+// 成功后要把旧目录留着，等二进制也换完了再删；中途失败由调用方改名回滚。
+// 没有旧目录（首次安装/异常镜像）时返回空串，表示"没什么可回退的"。
+func applyWebBundleKeepOld(webDir, tarPath string) (string, error) {
 	parent := filepath.Dir(webDir)
 	tmp := filepath.Join(parent, ".web-new")
 	old := filepath.Join(parent, ".web-old")
 
 	if err := os.RemoveAll(tmp); err != nil {
-		return fmt.Errorf("清理临时目录失败: %w", err)
+		return "", fmt.Errorf("清理临时目录失败: %w", err)
 	}
 	if err := os.RemoveAll(old); err != nil {
-		return fmt.Errorf("清理备份目录失败: %w", err)
+		return "", fmt.Errorf("清理备份目录失败: %w", err)
 	}
 	defer os.RemoveAll(tmp)
 
 	siteRoot, err := ExtractWebBundle(tarPath, tmp)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// 老目录不存在（例如异常镜像）时直接上位，不必先改名。
-	if Exists(webDir) {
+	hasOld := Exists(webDir)
+	if hasOld {
 		if err := os.Rename(webDir, old); err != nil {
-			return fmt.Errorf("备份原前端目录失败: %w", err)
+			return "", fmt.Errorf("备份原前端目录失败: %w", err)
 		}
 	}
 	if err := os.Rename(siteRoot, webDir); err != nil {
-		if Exists(old) {
+		if hasOld {
 			if rbErr := os.Rename(old, webDir); rbErr != nil {
-				return fmt.Errorf("新前端目录上位失败(%v)，且回滚失败(%v)", err, rbErr)
+				return "", fmt.Errorf("新前端目录上位失败(%v)，且回滚失败(%v)", err, rbErr)
 			}
 		}
-		return fmt.Errorf("新前端目录上位失败: %w", err)
+		return "", fmt.Errorf("新前端目录上位失败: %w", err)
 	}
+	return old, nil
+}
 
-	if Exists(old) {
-		os.RemoveAll(old)
+// rollbackWebBundle 把保留的旧前端目录换回来。
+func rollbackWebBundle(webDir, old string) error {
+	if old == "" || !Exists(old) {
+		return nil // 本来就没有旧目录，没什么可回退
 	}
+	// 新目录挪开而不是直接删：删掉之后万一回滚也失败，站点就彻底没了。
+	discard := filepath.Join(filepath.Dir(webDir), ".web-failed")
+	_ = os.RemoveAll(discard)
+	if Exists(webDir) {
+		if err := os.Rename(webDir, discard); err != nil {
+			return fmt.Errorf("挪开新前端目录失败: %w", err)
+		}
+	}
+	if err := os.Rename(old, webDir); err != nil {
+		// 回滚失败就把新目录放回去，绝不留在"没有站点"的状态。
+		if Exists(discard) {
+			_ = os.Rename(discard, webDir)
+		}
+		return fmt.Errorf("回滚前端目录失败: %w", err)
+	}
+	_ = os.RemoveAll(discard)
 	return nil
 }
