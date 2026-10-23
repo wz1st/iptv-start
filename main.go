@@ -17,7 +17,11 @@ import (
 )
 
 // 升级服务（启动器）—— 容器 PID 1。
-var VERSION = "v3.2.2"
+//
+// v3.2.3：在线升级的前端整包替换改为**纯文件级**落盘（原实现是目录级
+// rename，生产环境报 invalid cross-device link —— /app/web 是独立挂载点
+// 或来自镜像层，rename 跨设备必然失败）。见 until/webbundle.go。
+var VERSION = "v3.2.3"
 
 // 环境预检标记文件：镜像里可能还有旧版 iptv，它会检查这两个文件来
 // 跳过重复检查。新版 iptv 走 IPTV_PRECHECKED 环境变量，两条路都留着。

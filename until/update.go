@@ -182,6 +182,11 @@ func ApplyUpdate(binDir, webDir, updataDir string) ([]string, error) {
 		}
 		if err := rollbackWebBundle(webDir, webOld); err != nil {
 			msgs = append(msgs, fmt.Sprintf("回滚前端失败: %v", err))
+		} else if webOld != "" {
+			// 回退成功就把备份目录清掉：留着只会让下次升级的
+			// "有没有旧内容"判断失真（备份目录就在 webDir 的父目录）。
+			// 回退**失败**时不删 —— 那是人工排障的唯一线索。
+			_ = os.RemoveAll(webOld)
 		}
 		if len(msgs) == 0 {
 			return nil
@@ -198,6 +203,9 @@ func ApplyUpdate(binDir, webDir, updataDir string) ([]string, error) {
 			// 覆盖"解包成功但改名后异常"的少数情况。
 			if rbErr := rollbackWebBundle(webDir, old); rbErr != nil {
 				return nil, fmt.Errorf("应用前端升级包失败(%v)，且回滚失败(%v)", err, rbErr)
+			}
+			if old != "" {
+				_ = os.RemoveAll(old)
 			}
 			return nil, fmt.Errorf("应用前端升级包失败: %w", err)
 		}
@@ -284,12 +292,27 @@ func restoreFile(backupPath, dst string) error {
 }
 
 // replaceFile 用"同目录临时文件 + rename"做原子替换。
+//
+// 权限固定 0755：这个函数只用于替换**可执行文件**（api / engine / 启动器自愈），
+// 它们必须有执行位。前端静态资源要用 0644 —— 走 replaceFileWithMode。
 func replaceFile(src, dst string) error {
+	return replaceFileWithMode(src, dst, 0o755)
+}
+
+// replaceFileWithMode 同 replaceFile，但权限由调用方指定。
+//
+// 为什么需要它：前端产物是静态资源（html / js / css），给 0755 虽不影响
+// nginx 读取，但会让站点里每个文件都带执行位 —— 权限位不对的安全扫描会报，
+// 而且"能执行"对静态资源毫无意义。
+//
+// 临时文件与目标**同目录** ⇒ rename 必然同设备 ⇒ 不会撞 EXDEV；
+// 而且 rename 是原子的，nginx 不会读到写了一半的文件。
+func replaceFileWithMode(src, dst string, mode os.FileMode) error {
 	tmp := dst + ".new"
 	if err := os.Remove(tmp); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if err := copyFileMode(src, tmp, 0o755); err != nil {
+	if err := copyFileMode(src, tmp, mode); err != nil {
 		return err
 	}
 	if err := os.Rename(tmp, dst); err != nil {
