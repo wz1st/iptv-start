@@ -1,6 +1,7 @@
 package until
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -128,6 +129,50 @@ func imageVerFor(name, imgAPI, imgEngine string) string {
 	return ""
 }
 
+// 升级包"该换哪些文件"的来源：api 侧落盘的 /config/updata/staged.json。
+//
+// 升级是分链路的：引擎链路只落 engine，管理系统链路落 iptv + webdist.tar.gz。
+// 但 /config/updata 是跨轮复用的同一个目录，上一轮管理系统升级留下的
+// iptv / webdist.tar.gz 不会被自动清掉 —— 若 apply 阶段"目录里有什么就换什么"，
+// 就会出现"只升了引擎、管理系统/前端却也被一起换掉"的事故（见 2026-10-26 线上日志）。
+// 所以 apply 必须只换"本轮登记过"的产物，并以成功应用后清空待安装区收尾。
+type stagedApplyRecord struct {
+	Kind  string            `json:"kind"`
+	Files map[string]string `json:"files"`
+}
+
+// loadStagedApply 读 api 写下的本轮待安装产物清单。
+// 读不到 / 损坏 / 没有文件清单时返回空结构 + false，调用方据此回退到
+// "目录里有什么就换什么"的旧行为（兼容手动放包、老客户端）。
+func loadStagedApply(updataDir string) (stagedApplyRecord, bool) {
+	var r stagedApplyRecord
+	b, err := os.ReadFile(filepath.Join(updataDir, "staged.json"))
+	if err != nil {
+		return r, false
+	}
+	if err := json.Unmarshal(b, &r); err != nil {
+		return r, false
+	}
+	if len(r.Files) == 0 {
+		return r, false
+	}
+	return r, true
+}
+
+// cleanUpdataApplied 升级成功后清掉待安装区的所有已知产物与清单。
+//
+// 应用成功的那一轮，目录里不该再留任何东西：否则下次容器启动会把它当成
+// "待应用的升级包"再换一遍，表现为"只升了引擎、管理系统/前端却也被重换/回滚"。
+// 删的是已知产物名（iptv / engine / webdist.tar.gz）+ 清单本身，不动别的文件；
+// 清理失败最多多留几份旧包，不该因此把一次好端端的升级报成失败。
+func cleanUpdataApplied(updataDir string) {
+	for _, name := range updateTargets {
+		_ = os.Remove(filepath.Join(updataDir, name))
+	}
+	_ = os.Remove(filepath.Join(updataDir, webBundleName))
+	_ = os.Remove(filepath.Join(updataDir, "staged.json"))
+}
+
 // ApplyUpdate 把升级包里的内容原子替换到运行目录。
 //
 // ## 顺序与回退：这是一笔事务，不是一串独立操作
@@ -158,6 +203,11 @@ func ApplyUpdate(binDir, webDir, updataDir string) ([]string, error) {
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return nil, fmt.Errorf("运行目录不可写: %w", err)
 	}
+
+	// 本轮待安装产物的落地名集合：只换"登记过"的文件。读不到清单时回退到
+	// 旧行为（目录里有什么换什么），兼容手动放包 / 老客户端。
+	staged, stagedOK := loadStagedApply(updataDir)
+	allowAll := !stagedOK
 
 	var applied []string
 
@@ -196,7 +246,7 @@ func ApplyUpdate(binDir, webDir, updataDir string) ([]string, error) {
 
 	// ---- 第 1 步：前端整包 ----
 	webOld := ""
-	if bundle := filepath.Join(updataDir, webBundleName); Exists(bundle) {
+	if bundle := filepath.Join(updataDir, webBundleName); Exists(bundle) && (allowAll || staged.Files[webBundleName] != "") {
 		old, err := applyWebBundleKeepOld(webDir, bundle)
 		if err != nil {
 			// 整包应用内部已做过一次"上位失败就换回旧目录"，这里再兜一层
@@ -219,6 +269,11 @@ func ApplyUpdate(binDir, webDir, updataDir string) ([]string, error) {
 	for _, name := range updateTargets {
 		src := filepath.Join(updataDir, name)
 		if !Exists(src) {
+			continue
+		}
+		// 不在本轮登记清单里 ⇒ 是上一轮残留的跨链路文件，绝不换。
+		if !allowAll && staged.Files[name] == "" {
+			log.Printf("跳过非本轮产物（%s 不在本轮升级清单中，可能是上一轮残留）", name)
 			continue
 		}
 		fi, err := os.Stat(src)
@@ -254,6 +309,9 @@ func ApplyUpdate(binDir, webDir, updataDir string) ([]string, error) {
 	if webOld != "" {
 		_ = os.RemoveAll(webOld)
 	}
+	// 升级成功 ⇒ 清空待安装区：本轮产物 + 清单一并删掉，避免下次启动被重新换上
+	//（尤其"只升引擎却残留着上轮管理系统包"这类跨链路残留会酿成事故）。
+	cleanUpdataApplied(updataDir)
 	return applied, nil
 }
 
